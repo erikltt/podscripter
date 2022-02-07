@@ -292,12 +292,12 @@ def loadtranslatedtitles_imdb():
     i = 0
     with gzip.open(tsv_filename, "rt") as csvfile:
         # with open(input_tsv_file, newline='') as csvfile:
-        csvreader = csv.DictReader(csvfile, delimiter='\t')
-        print("Inserting data...")
+        csvreader = csv.DictReader(csvfile, delimiter='\t', quoting=csv.QUOTE_NONE)
+        print("Updating data...")
         for row in csvreader:
-            if row["language"] == "FR":
+            if row["language"] == "fr":
                 # Execute a SQL INSERT command
-                sql = 'UPDATE move set TRANSLATED=%s where imdbid=%s'
+                sql = 'UPDATE movie set TRANSLATED=%s where imdbid=%s'
                 params = (row["title"], row["titleId"])
                 cur.execute(sql, params)
                 i = i + 1
@@ -364,8 +364,3 @@ if __name__ == '__main__':
 
     if args.action == "loaddbtranslated":
         loadtranslatedtitles_imdb()
-
-    if args.action == "all":
-        conversion()
-        transcription(AUDIO_CHUNKS_FOLDER)
-        parse(TEXT_FILE)
