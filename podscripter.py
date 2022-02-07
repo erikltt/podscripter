@@ -1,8 +1,11 @@
 #!/usr/bin/env python3
 import csv
+import gzip
 import json
+import pathlib
 import time
 import uuid
+from enum import Enum
 from os import listdir
 from os.path import isfile, join
 from urllib.parse import urlparse
@@ -22,7 +25,6 @@ from pydub.silence import split_on_silence
 import argparse
 from spacy.matcher import Matcher
 
-
 import feedparser
 
 AUDIO_FILE = "converted.wav"
@@ -34,9 +36,31 @@ HOST = "localhost"
 USER = "openlibdbworks"
 PASSWORD = "120485"
 DATABASE = "openlibdbworks"
+IMDB_DATASET_URL = "https://datasets.imdbws.com/title.basics.tsv.gz"
+IMDB_DATASET_DIR = "imdb_dataset/"
+PODCAST_DIR = "podcasts/"
+IMDB_URLS = Enum("IMDB_URL", [("TITLES", "https://datasets.imdbws.com/title.basics.tsv.gz"),
+                          ("TRANSLATION", "https://datasets.imdbws.com/title.akas.tsv.gz")])
+
+
+def download_imdb_dataset(url=IMDB_URLS.TITLES.value):
+    print("Downloading data...")
+    url_parse = urlparse(url)
+    filename = os.path.basename(url_parse.path)
+    r = requests.get(url, allow_redirects=True)
+
+    if not os.path.isdir(IMDB_DATASET_DIR):
+        os.mkdir(IMDB_DATASET_DIR)
+    folder_file = IMDB_DATASET_DIR + filename
+    open(folder_file, 'wb').write(r.content)
+
+    print("Ended")
+
+    return folder_file
+
 
 def download_rss_feed():
-    feed = feedparser.parse('http://radiofrance-podcast.net/podcast09/rss_10617.xml')
+    feed = feedparser.parse(xml_feed_url)
 
     for entry in feed.entries:
         url = entry.links[1].href
@@ -44,7 +68,12 @@ def download_rss_feed():
         filename = os.path.basename(url_parse.path)
         r = requests.get(url, allow_redirects=True)
 
-        open(filename, 'wb').write(r.content)
+        if not os.path.isdir(PODCAST_DIR):
+            os.mkdir(PODCAST_DIR)
+
+        folder_file = PODCAST_DIR + filename
+
+        open(folder_file, 'wb').write(r.content)
 
 
 # a function that splits the audio file into chunks
@@ -115,13 +144,14 @@ def speed_change(audiofile, speed=1.0):
 
 
 def sound_convert_to_wav(mp3_filepath):
-    filename = os.path.basename(mp3_filepath)
+    filename, file_extension = os.path.splitext(mp3_filepath)
     # convert mp3 to wav
     sound = AudioSegment.from_mp3(mp3_filepath)
     # sound = speed_change(sound, 0.5)
-    sound.export(AUDIO_FILE, format="wav")
+    wav_file_path = filename + ".wav"
+    sound.export(wav_file_path, format="wav")
 
-    return filename
+    return wav_file_path
 
 
 def write_line(text_to_write, name_of_file=TEXT_FILE):
@@ -156,9 +186,10 @@ def transcription():
     model = Model("model")
     rec = KaldiRecognizer(model, SAMPLE_RATE)
 
+    filename = pathlib.PurePath(chunk_folder).name + ".txt"
     list_of_chunks = [f for f in sorted(listdir(chunk_folder)) if isfile(join(chunk_folder, f))]
 
-    filename = time.strftime("%Y%m%d-%H%M%S") + ".txt"
+    # filename = time.strftime("%Y%m%d-%H%M%S") + ".txt"
     for i, chunk_filename in enumerate(list_of_chunks, start=1):
         # process each chunk
         progress(i, len(list_of_chunks), "Transcribing")
@@ -184,7 +215,7 @@ def database_extraction():
     # table full scan to load data
     rs = []
     rs_string = []
-    sql = 'select title from movie'
+    sql = 'select translated from movie'
     cur.execute(sql)
     rs.append(cur.fetchall())
 
@@ -227,39 +258,77 @@ def parse():
 
     match_list.extend(
         match_film(doc, matcher,
-                   [{"ENT_TYPE": "PER"}, {"TEXT": "dans"}, {"LOWER": {"IN": rs_string}}], 2))
+                   [{"ENT_TYPE": "PER"},
+                    {"TEXT": "dans"},
+                    {"LOWER": {"IN": rs_string}}], 2))
     match_list.extend(
         match_film(doc, matcher,
-                   [{"TEXT": "en", "OP": "!"}, {"LOWER": {"IN": rs_string}}, {"TEXT": "de"}, {"ENT_TYPE": "PER"}], 1))
+                   [{"TEXT": "en", "OP": "!"},
+                    {"LOWER": {"IN": rs_string}},
+                    {"TEXT": "de"},
+                    {"ENT_TYPE": "PER"}], 1))
     match_list.extend(
         match_film(doc, matcher,
-                   [{"ENT_TYPE": "DET"}, {"TEXT": "film"}, {"LOWER": {"IN": rs_string}}], 2))
+                   [{"ENT_TYPE": "DET"},
+                    {"TEXT": "film"},
+                    {"LOWER": {"IN": rs_string}}], 2))
     match_list.extend(
         match_film(doc, matcher,
-                   [{"TEXT": "film"}, {"ENT_TYPE": "VERB"}, {"LOWER": {"IN": rs_string}}], 2))
+                   [{"TEXT": "film"},
+                    {"ENT_TYPE": "VERB"},
+                    {"LOWER": {"IN": rs_string}}], 2))
 
     return match_list
 
 
-def loadmovies_imdb():
+def loadtranslatedtitles_imdb():
+    tsv_filename = download_imdb_dataset(IMDB_URLS.TRANSLATION.value)
+
     # Open connection
     conn = psycopg2.connect("host=%s dbname=%s user=%s password=%s" % (HOST, DATABASE, USER, PASSWORD))
     # Open a cursor to send SQL commands
     cur = conn.cursor()
 
     i = 0
-    with open(input_tsv_file, newline='') as csvfile:
+    with gzip.open(tsv_filename, "rt") as csvfile:
+        # with open(input_tsv_file, newline='') as csvfile:
         csvreader = csv.DictReader(csvfile, delimiter='\t')
+        print("Inserting data...")
+        for row in csvreader:
+            if row["language"] == "FR":
+                # Execute a SQL INSERT command
+                sql = 'UPDATE move set TRANSLATED=%s where imdbid=%s'
+                params = (row["title"], row["titleId"])
+                cur.execute(sql, params)
+                i = i + 1
 
+        conn.commit()
+    print("Ended")
+
+
+def loadmovies_imdb():
+    tsv_filename = download_imdb_dataset()
+
+    # Open connection
+    conn = psycopg2.connect("host=%s dbname=%s user=%s password=%s" % (HOST, DATABASE, USER, PASSWORD))
+    # Open a cursor to send SQL commands
+    cur = conn.cursor()
+
+    i = 0
+    with gzip.open(tsv_filename, "rt") as csvfile:
+    # with open(input_tsv_file, newline='') as csvfile:
+        csvreader = csv.DictReader(csvfile, delimiter='\t')
+        print("Inserting data...")
         for row in csvreader:
             if row["titleType"] == "movie":
                 # Execute a SQL INSERT command
-                sql = 'INSERT INTO movie VALUES (%s,%s)'
-                params = (i, row["primaryTitle"])
+                sql = 'INSERT INTO movie VALUES (%s,%s,%s,%s)'
+                params = (i, row["primaryTitle"], row["tconst"], row["primaryTitle"])
                 cur.execute(sql, params)
-                i = i+1
+                i = i + 1
 
         conn.commit()
+    print("Ended")
 
 
 if __name__ == '__main__':
@@ -270,13 +339,13 @@ if __name__ == '__main__':
     parser.add_argument("--file", help="MP3 to transcript", required="--convert" in sys.argv)
     parser.add_argument("--chunkfolder", help="folder containing chunks", required="--transcript" in sys.argv)
     parser.add_argument("--transcriptedfile", help="file to parse", required="--parse" in sys.argv)
-    parser.add_argument("--imdbtsvfile", help="IMDB TSV simple title file", required="--loaddb" in sys.argv)
+    parser.add_argument("--xmlfeedurl", help="Feed URL XML format", required="--download" in sys.argv)
     args = parser.parse_args()
     action = args.action
     sound_file_path = args.file
     chunk_folder = args.chunkfolder
     transcripted_file = args.transcriptedfile
-    input_tsv_file = args.imdbtsvfile
+    xml_feed_url = args.xmlfeedurl
 
     if args.action == "convert":
         conversion()
@@ -292,6 +361,9 @@ if __name__ == '__main__':
 
     if args.action == "loaddb":
         loadmovies_imdb()
+
+    if args.action == "loaddbtranslated":
+        loadtranslatedtitles_imdb()
 
     if args.action == "all":
         conversion()
