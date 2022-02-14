@@ -1,31 +1,27 @@
 #!/usr/bin/env python3
+import argparse
 import csv
 import gzip
 import json
+import os
 import pathlib
-import time
-import uuid
+import re
+import subprocess
+import sys
 from enum import Enum
 from os import listdir
 from os.path import isfile, join
 from urllib.parse import urlparse
 
+import feedparser
 import psycopg2 as psycopg2
 import requests
 import spacy as spacy
-from spacy.matcher import PhraseMatcher
-from spacy.tokens import Span
-from vosk import Model, KaldiRecognizer, SetLogLevel
-import sys
-import os
-import wave
-import subprocess
 from pydub import AudioSegment
 from pydub.silence import split_on_silence
-import argparse
 from spacy.matcher import Matcher
-
-import feedparser
+from vosk import Model, KaldiRecognizer, SetLogLevel
+from names_dataset import NameDataset
 
 AUDIO_FILE = "converted.wav"
 TEXT_FILE = "transcripted.txt"
@@ -40,7 +36,8 @@ IMDB_DATASET_URL = "https://datasets.imdbws.com/title.basics.tsv.gz"
 IMDB_DATASET_DIR = "imdb_dataset/"
 PODCAST_DIR = "podcasts/"
 IMDB_URLS = Enum("IMDB_URL", [("TITLES", "https://datasets.imdbws.com/title.basics.tsv.gz"),
-                          ("TRANSLATION", "https://datasets.imdbws.com/title.akas.tsv.gz")])
+                              ("TRANSLATION", "https://datasets.imdbws.com/title.akas.tsv.gz"),
+                              ("RATING", "https://datasets.imdbws.com/title.ratings.tsv.gz")])
 
 
 def download_imdb_dataset(url=IMDB_URLS.TITLES.value):
@@ -215,70 +212,175 @@ def database_extraction():
     # table full scan to load data
     rs = []
     rs_string = []
-    sql = 'select translated from movie'
+    sql = 'select translated, imdbid from movie where rating > 0 order by length(translated) desc'
     cur.execute(sql)
     rs.append(cur.fetchall())
 
     return rs
 
 
-def match_film(doc, matcher, pattern, position):
+def __match_film(doc, matcher, pattern, position):
     match_list = []
+    match_text = []
     matcher.add("FILM", [pattern])
     matches = matcher(doc)
     matcher.remove("FILM")
 
     for match_id, start, end in matches:
         match_list.append(str.replace(doc[start + position].text, '_', ' '))
+        match_text.append(str.replace(doc[start:end].text, '_', ' '))
+
+    print("Pattern selected: ", match_list)
+    print("Matched text    : ", match_text)
 
     return match_list
 
 
-def parse():
-    with open(transcripted_file) as f:
-        lines = f.readlines()
-
-    f.close()
-    transcripted_text = ' '.join(lines)
-
-    rs = database_extraction()
+def __brute_match(rs, transcripted_text):
+    """Brute match the IMDB DB with the transcripted text, to detect film title only with a classic regexp
+    This leads to a lot a false positives but still filters the list for the fine-grained further
+    spacy matching process"""
     rs_string = []
-    for title in rs[0]:
-        text_title = title[0].lower()
-        if len(text_title) > 2 and text_title in transcripted_text:
-            replaced_title = str.replace(text_title, ' ', '_').lower()
-            rs_string.append(replaced_title)
-            transcripted_text = str.replace(transcripted_text, text_title, replaced_title)
 
-    nlp = spacy.load('/home/sylvain/.local/lib/python3.8/site-packages/fr_core_news_sm/fr_core_news_sm-3.2.0')
+    # setting up exception list, we have the word "film" to avoid the matcher to consider it as a film title since it
+    # would make it miss matching rule MR1/2/3 (MR containg the word film)
+    exception_list = []
+    exception_list.append("film")
+
+    # using case folded transcripted text to match without case consideration
+    transcripted_text_casefolded = transcripted_text.casefold()
+
+    # going through the list of title to make a brute match first
+    for title in rs[0]:
+        text_title = title[0]
+        text_title_casefold = text_title.casefold()
+        # we avoid getting film with less than 2 characters, that would make too much false positives
+        # we convert to brute-detected film name with underscore to make it work with spacy matcher (if we have a space
+        # in the title, spacy will consider it as a new token and miss a match)
+        if len(text_title) > 2 \
+                and text_title_casefold in transcripted_text_casefolded \
+                and text_title_casefold not in exception_list:
+            # we avoid modifying film title containing only one word, it could be a name or surname, and that would
+            # interfere with the preparse process that uppercase such words to make spacy recognize them as "PROPN"
+            if len(text_title.split()) > 1:
+                replaced_title = str.replace(text_title, ' ', '_').lower()
+            else:
+                replaced_title = text_title
+            # we add the brute-matched title to the list of possible real match
+            rs_string.append(replaced_title)
+            # rewrite the text with this possible match (with _ instead of spaces)
+            transcripted_text = re.sub(r"\b%s\b" % text_title, replaced_title, transcripted_text, flags=re.IGNORECASE)
+
+    return rs_string, transcripted_text
+
+
+def __fine_match(rs_string, transcripted_text):
+    """Fine-matching using spacy matcher and the following matching rules
+    MR1 :   {"LOWER": "film"}, {"LOWER": {"IN": rs_string}}, {"POS": "PROPN"}
+        --> film vous ne désirez que moi Claire Simon
+    MR2 :   {"POS": "DET"}, {"LOWER": "film"}, {"LOWER": {"IN": rs_string}}, {"TEXT": "de"}
+        --> Le film les jeunes amants de carine tardieu
+    MR3 :   {"POS": "ADJ"}, {"LOWER": {"IN": rs_string}}, {"POS": "DET", "OP": "?"}, {"POS": "NOUN"},
+            {"POS": "ADP", "OP": "?"}, {"LOWER": "film"}
+        -->  réjouissant les voisins de mes voisins sont mes voisins (un) drôle (de) film
+    MR4 :   {"LEMMA": "voir"}, {"POS": "DET"}, {"LOWER": {"IN": rs_string}}, {"POS": "VERB", "OP": "!"}
+        --> voir ce petite solange
+    MR5 :   {"LEMMA": "voir"}, {"LOWER": {"IN": rs_string}}, {"POS": "VERB", "OP": "!"}
+        --> voir teresa la voleuse
+    """
+    nlp = spacy.load('/home/sylvain/.local/lib/python3.8/site-packages/fr_core_news_md/fr_core_news_md-3.2.0')
 
     matcher = Matcher(nlp.vocab)
     doc = nlp(transcripted_text)
     match_list = []
 
+    # MR1 : film vous ne désirez que moi claire simon
     match_list.extend(
-        match_film(doc, matcher,
-                   [{"ENT_TYPE": "PER"},
-                    {"TEXT": "dans"},
-                    {"LOWER": {"IN": rs_string}}], 2))
-    match_list.extend(
-        match_film(doc, matcher,
-                   [{"TEXT": "en", "OP": "!"},
+        __match_film(doc, matcher,
+                   [{"LOWER": "film"},
                     {"LOWER": {"IN": rs_string}},
-                    {"TEXT": "de"},
-                    {"ENT_TYPE": "PER"}], 1))
+                    {"POS": "PROPN"}], 1))
+    # MR2 : Le film les jeunes amants de carine tardieu
     match_list.extend(
-        match_film(doc, matcher,
-                   [{"ENT_TYPE": "DET"},
-                    {"TEXT": "film"},
-                    {"LOWER": {"IN": rs_string}}], 2))
+        __match_film(doc, matcher,
+                   [{"POS": "DET"},
+                    {"LOWER": "film"},
+                    {"LOWER": {"IN": rs_string}},
+                    {"TEXT": "de"}], 2))
+    # MR3 : réjouissant les voisins de mes voisins sont mes voisins (un) drôle (de) film
     match_list.extend(
-        match_film(doc, matcher,
-                   [{"TEXT": "film"},
-                    {"ENT_TYPE": "VERB"},
-                    {"LOWER": {"IN": rs_string}}], 2))
+        __match_film(doc, matcher,
+                   [{"POS": "ADJ"},
+                    {"LOWER": {"IN": rs_string}},
+                    {"POS": "DET", "OP": "?"},
+                    {"POS": "NOUN"},
+                    {"POS": "ADP", "OP": "?"},
+                    {"LOWER": "film"}], 1))
+    # MR4 : voir ce petite solange
+    match_list.extend(
+        __match_film(doc, matcher,
+                   [{"LEMMA": "voir"},
+                    {"POS": "DET"},
+                    {"LOWER": {"IN": rs_string}},
+                    {"POS": "VERB", "OP": "!"}], 2))
+    # MR5 : voir teresa la voleuse
+    match_list.extend(
+        __match_film(doc, matcher,
+                   [{"LEMMA": "voir"},
+                    {"LOWER": {"IN": rs_string}},
+                    {"POS": "VERB", "OP": "!"}], 1))
+    # match_list.extend(
+    #     match_film(doc, matcher,
+    #                [{"ENT_TYPE": "DET"},
+    #                 {"TEXT": "film"},
+    #                 {"LOWER": {"IN": rs_string}}], 2))
+    # match_list.extend(
+    #     match_film(doc, matcher,
+    #                [{"TEXT": "film"},
+    #                 {"ENT_TYPE": "VERB"},
+    #                 {"LOWER": {"IN": rs_string}}], 2))
+    # match_list.extend(
+    #     match_film(doc, matcher,
+    #                [{"POS": "ADJ"},
+    #                 {"LOWER": {"IN": rs_string}},
+    #                 {"POS": "ADP"}], 1))
+    #
+    # # FILM avec Gérard Depardieu (FILM + nom propre)
+    # match_list.extend(
+    #     match_film(doc, matcher,
+    #                [{"LOWER": {"IN": rs_string}},
+    #                 {"TEXT": "avec"},
+    #                 {"ENT_TYPE": "PER"}], 0))
+    #
+    # # FILM formidable (film + adjectif)
+    # match_list.extend(
+    #     match_film(doc, matcher,
+    #                [{"LOWER": {"IN": rs_string}},
+    #                 {"ENT_TYPE": "ADJ"},
+    #                 ], 0))
+    return list(dict.fromkeys(match_list))
 
-    return match_list
+
+def parse():
+    """Parse the input file to match film contained in the text.
+    1. Load the file
+    2. Extract the IMDB DB
+    3. Brute match with simple regex
+    4. Fine match with SPACY matcher"""
+    # loading data from input text file
+    with open(transcripted_file) as f:
+        lines = f.readlines()
+    f.close()
+    transcripted_text = ' '.join(lines)
+
+    # loading data from DB
+    rs = database_extraction()
+
+    # proceed with brute match
+    rs_string, transcripted_text = __brute_match(rs, transcripted_text)
+
+    # proceed with spacy fine match
+    return __fine_match(rs_string, transcripted_text)
 
 
 def loadtranslatedtitles_imdb():
@@ -295,12 +397,36 @@ def loadtranslatedtitles_imdb():
         csvreader = csv.DictReader(csvfile, delimiter='\t', quoting=csv.QUOTE_NONE)
         print("Updating data...")
         for row in csvreader:
-            if row["language"] == "fr":
+            # if row["region"] == "FR" and row["language"] == "fr":
+            if row["region"] == "FR":
                 # Execute a SQL INSERT command
                 sql = 'UPDATE movie set TRANSLATED=%s where imdbid=%s'
                 params = (row["title"], row["titleId"])
                 cur.execute(sql, params)
                 i = i + 1
+
+        conn.commit()
+    print("Ended")
+
+
+def loadrating_imdb():
+    tsv_filename = download_imdb_dataset(IMDB_URLS.RATING.value)
+
+    # Open connection
+    conn = psycopg2.connect("host=%s dbname=%s user=%s password=%s" % (HOST, DATABASE, USER, PASSWORD))
+    # Open a cursor to send SQL commands
+    cur = conn.cursor()
+
+    i = 0
+    with gzip.open(tsv_filename, "rt") as csvfile:
+        csvreader = csv.DictReader(csvfile, delimiter='\t', quoting=csv.QUOTE_NONE)
+        print("Updating data...")
+        for row in csvreader:
+            # Execute a SQL UPDATE command
+            sql = 'UPDATE movie set rating=%s where imdbid=%s'
+            params = (row["averageRating"], row["tconst"])
+            cur.execute(sql, params)
+            i = i + 1
 
         conn.commit()
     print("Ended")
@@ -316,19 +442,64 @@ def loadmovies_imdb():
 
     i = 0
     with gzip.open(tsv_filename, "rt") as csvfile:
-    # with open(input_tsv_file, newline='') as csvfile:
+        # with open(input_tsv_file, newline='') as csvfile:
         csvreader = csv.DictReader(csvfile, delimiter='\t')
         print("Inserting data...")
         for row in csvreader:
             if row["titleType"] == "movie":
                 # Execute a SQL INSERT command
                 sql = 'INSERT INTO movie VALUES (%s,%s,%s,%s)'
-                params = (i, row["primaryTitle"], row["tconst"], row["primaryTitle"])
+                params = (i, row["originalTitle"], row["tconst"], row["originalTitle"])
                 cur.execute(sql, params)
                 i = i + 1
 
         conn.commit()
     print("Ended")
+
+
+def preparse():
+    nd = NameDataset()
+
+    with open(transcripted_file, "r") as f:
+        lines = f.readlines()
+    f.close()
+
+    transcripted_text = ' '.join(lines)
+
+    nlp = spacy.load('/home/sylvain/.local/lib/python3.8/site-packages/fr_core_news_md/fr_core_news_md-3.2.0')
+    doc = nlp(transcripted_text)
+    # Create list of word tokens after removing stopwords
+
+    token_list = []
+    common_names = []
+    common_names_dict = nd.get_top_names(n=500, use_first_names=True, country_alpha2='FR')
+    common_names.extend(common_names_dict["FR"]["M"])
+    common_names.extend(common_names_dict["FR"]["F"])
+    common_names_dict = nd.get_top_names(n=500, use_first_names=True, country_alpha2='US')
+    common_names.extend(common_names_dict["US"]["M"])
+    common_names.extend(common_names_dict["US"]["F"])
+    common_names_dict = nd.get_top_names(n=500, use_first_names=True, country_alpha2='GB')
+    common_names.extend(common_names_dict["GB"]["M"])
+    common_names.extend(common_names_dict["GB"]["F"])
+
+    # common_names = [name.lower() for name in common_names]
+
+    for token in doc:
+        if not token.is_stop:  # and token.pos_ == "NOUN":
+            if token.text.capitalize() in common_names:
+                token_list.append(token.text)
+
+    token_list = list(dict.fromkeys(token_list))
+
+    for name in token_list:
+        transcripted_text = re.sub(r"\b%s\b" % name, name.capitalize(), transcripted_text)
+
+    with open(transcripted_file, "w") as f:
+        f.truncate(0)
+        f.write(transcripted_text)
+    f.close()
+
+    print("End")
 
 
 if __name__ == '__main__':
@@ -338,7 +509,8 @@ if __name__ == '__main__':
                                          "conversion", required=True)
     parser.add_argument("--file", help="MP3 to transcript", required="--convert" in sys.argv)
     parser.add_argument("--chunkfolder", help="folder containing chunks", required="--transcript" in sys.argv)
-    parser.add_argument("--transcriptedfile", help="file to parse", required="--parse" in sys.argv)
+    parser.add_argument("--transcriptedfile", help="file to pre-parse",
+                        required="--preparse" in sys.argv or "--parse" in sys.argv)
     parser.add_argument("--xmlfeedurl", help="Feed URL XML format", required="--download" in sys.argv)
     args = parser.parse_args()
     action = args.action
@@ -353,6 +525,9 @@ if __name__ == '__main__':
     if args.action == "transcript":
         transcription()
 
+    if args.action == "preparse":
+        print(preparse())
+
     if args.action == "parse":
         print(parse())
 
@@ -361,6 +536,9 @@ if __name__ == '__main__':
 
     if args.action == "loaddb":
         loadmovies_imdb()
+
+    if args.action == "loadrating":
+        loadrating_imdb()
 
     if args.action == "loaddbtranslated":
         loadtranslatedtitles_imdb()
