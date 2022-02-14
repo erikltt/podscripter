@@ -1,4 +1,5 @@
 # podscripter
 Extract informations from podcasts
-# Installation
-git clone https://github.com/erikltt/podscripter
+## Installation
+Repo : git clone https://github.com/erikltt/podscripter
+VOSK : pip3 install vosk
