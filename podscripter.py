@@ -1,14 +1,13 @@
 #!/usr/bin/env python3
 import argparse
-import csv
-import gzip
 import json
 import os
 import pathlib
 import re
+import sqlite3
+from sqlite3 import Error
 import subprocess
 import sys
-from enum import Enum
 from os import listdir
 from os.path import isfile, join
 from urllib.parse import urlparse
@@ -28,33 +27,8 @@ TEXT_FILE = "transcribed.txt"
 AUDIO_CHUNKS_FOLDER = "audio-chunks"
 SAMPLE_RATE = 16000
 
-HOST = "localhost"
-USER = "openlibdbworks"
-PASSWORD = "120485"
-DATABASE = "openlibdbworks"
-IMDB_DATASET_URL = "https://datasets.imdbws.com/title.basics.tsv.gz"
-IMDB_DATASET_DIR = "imdb_dataset/"
 PODCAST_DIR = "podcasts/"
-IMDB_URLS = Enum("IMDB_URL", [("TITLES", "https://datasets.imdbws.com/title.basics.tsv.gz"),
-                              ("TRANSLATION", "https://datasets.imdbws.com/title.akas.tsv.gz"),
-                              ("RATING", "https://datasets.imdbws.com/title.ratings.tsv.gz")])
-
-
-def __download_imdb_dataset(url=IMDB_URLS.TITLES.value):
-    """Download IMDB Dataset and store it"""
-    print("Downloading data...")
-    url_parse = urlparse(url)
-    filename = os.path.basename(url_parse.path)
-    r = requests.get(url, allow_redirects=True)
-
-    if not os.path.isdir(IMDB_DATASET_DIR):
-        os.mkdir(IMDB_DATASET_DIR)
-    folder_file = IMDB_DATASET_DIR + filename
-    open(folder_file, 'wb').write(r.content)
-
-    print("Ended")
-
-    return folder_file
+DB_FILE = "moviedb.db"
 
 
 def download_rss_feed():
@@ -209,22 +183,35 @@ def conversion():
     chunks = __chunk_wav_file(wav_file, folder)
 
 
+def create_connection(db_file):
+    """ create a database connection to the SQLite database
+        specified by db_file
+    :param db_file: database file
+    :return: Connection object or None
+    """
+    conn = None
+    try:
+        conn = sqlite3.connect(db_file)
+        return conn
+    except Error as e:
+        print(e)
+
+    return conn
+
+
 def __database_extraction():
-    """Extract all movie title from PL/SQL DB and return a result set
+    """Extract all movie title from SQLite DB and return a result set
     We only get films with ratings to avoid being polluted by films with limited diffusion
     We get the films ordered by length of title desc, for a better match with the transcribed file"""
     # Open connection
-    conn = psycopg2.connect("host=%s dbname=%s user=%s password=%s" % (HOST, DATABASE, USER, PASSWORD))
+    conn = create_connection(DB_FILE)
     # Open a cursor to send SQL commands
     cur = conn.cursor()
-    # table full scan to load data
-    rs = []
-    rs_string = []
     sql = 'select translated, imdbid from movie where rating > 0 order by length(translated) desc'
     cur.execute(sql)
-    rs.append(cur.fetchall())
+    rows = cur.fetchall()
 
-    return rs
+    return rows
 
 
 def __match_film(doc, matcher, pattern, position):
@@ -255,15 +242,13 @@ def __brute_match(rs, transcribed_text):
 
     # setting up exception list, we have the word "film" to avoid the matcher to consider it as a film title since it
     # would make it miss matching rule MR1/2/3 (MR containg the word film)
-    exception_list = []
-    exception_list.append("film")
+    exception_list = ["film"]
 
     # using case folded transcribed text to match without case consideration
     transcribed_text_casefolded = transcribed_text.casefold()
 
     # going through the list of title to make a brute match first
-    for title in rs[0]:
-        text_title = title[0]
+    for text_title, imdbid in rs:
         text_title_casefold = text_title.casefold()
         # we avoid getting film with less than 2 characters, that would make too much false positives
         # we convert to brute-detected film name with underscore to make it work with spacy matcher (if we have a space
@@ -340,35 +325,7 @@ def __fine_match(rs_string, transcribed_text):
                    [{"LEMMA": "voir"},
                     {"LOWER": {"IN": rs_string}},
                     {"POS": "VERB", "OP": "!"}], 1))
-    # match_list.extend(
-    #     match_film(doc, matcher,
-    #                [{"ENT_TYPE": "DET"},
-    #                 {"TEXT": "film"},
-    #                 {"LOWER": {"IN": rs_string}}], 2))
-    # match_list.extend(
-    #     match_film(doc, matcher,
-    #                [{"TEXT": "film"},
-    #                 {"ENT_TYPE": "VERB"},
-    #                 {"LOWER": {"IN": rs_string}}], 2))
-    # match_list.extend(
-    #     match_film(doc, matcher,
-    #                [{"POS": "ADJ"},
-    #                 {"LOWER": {"IN": rs_string}},
-    #                 {"POS": "ADP"}], 1))
-    #
-    # # FILM avec Gérard Depardieu (FILM + nom propre)
-    # match_list.extend(
-    #     match_film(doc, matcher,
-    #                [{"LOWER": {"IN": rs_string}},
-    #                 {"TEXT": "avec"},
-    #                 {"ENT_TYPE": "PER"}], 0))
-    #
-    # # FILM formidable (film + adjectif)
-    # match_list.extend(
-    #     match_film(doc, matcher,
-    #                [{"LOWER": {"IN": rs_string}},
-    #                 {"ENT_TYPE": "ADJ"},
-    #                 ], 0))
+
     return list(dict.fromkeys(match_list))
 
 
@@ -392,83 +349,6 @@ def parse():
 
     # proceed with spacy fine match
     return __fine_match(rs_string, transcribed_text)
-
-
-def loadtranslatedtitles_imdb():
-    """Downloads and loads translated movie titles from IMDB downloaded dataset"""
-    tsv_filename = __download_imdb_dataset(IMDB_URLS.TRANSLATION.value)
-
-    # Open connection
-    conn = psycopg2.connect("host=%s dbname=%s user=%s password=%s" % (HOST, DATABASE, USER, PASSWORD))
-    # Open a cursor to send SQL commands
-    cur = conn.cursor()
-
-    i = 0
-    with gzip.open(tsv_filename, "rt") as csvfile:
-        # with open(input_tsv_file, newline='') as csvfile:
-        csvreader = csv.DictReader(csvfile, delimiter='\t', quoting=csv.QUOTE_NONE)
-        print("Updating data...")
-        for row in csvreader:
-            # if row["region"] == "FR" and row["language"] == "fr":
-            if row["region"] == "FR":
-                # Execute a SQL INSERT command
-                sql = 'UPDATE movie set TRANSLATED=%s where imdbid=%s'
-                params = (row["title"], row["titleId"])
-                cur.execute(sql, params)
-                i = i + 1
-
-        conn.commit()
-    print("Ended")
-
-
-def loadrating_imdb():
-    """Downloads and loads movie ratings from IMDB downloaded dataset"""
-    tsv_filename = __download_imdb_dataset(IMDB_URLS.RATING.value)
-
-    # Open connection
-    conn = psycopg2.connect("host=%s dbname=%s user=%s password=%s" % (HOST, DATABASE, USER, PASSWORD))
-    # Open a cursor to send SQL commands
-    cur = conn.cursor()
-
-    i = 0
-    with gzip.open(tsv_filename, "rt") as csvfile:
-        csvreader = csv.DictReader(csvfile, delimiter='\t', quoting=csv.QUOTE_NONE)
-        print("Updating data...")
-        for row in csvreader:
-            # Execute a SQL UPDATE command
-            sql = 'UPDATE movie set rating=%s where imdbid=%s'
-            params = (row["averageRating"], row["tconst"])
-            cur.execute(sql, params)
-            i = i + 1
-
-        conn.commit()
-    print("Ended")
-
-
-def loadmovies_imdb():
-    """Downloads and loads movie from IMDB downloaded dataset"""
-    tsv_filename = __download_imdb_dataset()
-
-    # Open connection
-    conn = psycopg2.connect("host=%s dbname=%s user=%s password=%s" % (HOST, DATABASE, USER, PASSWORD))
-    # Open a cursor to send SQL commands
-    cur = conn.cursor()
-
-    i = 0
-    with gzip.open(tsv_filename, "rt") as csvfile:
-        # with open(input_tsv_file, newline='') as csvfile:
-        csvreader = csv.DictReader(csvfile, delimiter='\t')
-        print("Inserting data...")
-        for row in csvreader:
-            if row["titleType"] == "movie":
-                # Execute a SQL INSERT command
-                sql = 'INSERT INTO movie VALUES (%s,%s,%s,%s)'
-                params = (i, row["originalTitle"], row["tconst"], row["originalTitle"])
-                cur.execute(sql, params)
-                i = i + 1
-
-        conn.commit()
-    print("Ended")
 
 
 def preparse():
@@ -555,11 +435,3 @@ if __name__ == '__main__':
     if args.action == "download":
         download_rss_feed()
 
-    if args.action == "loaddb":
-        loadmovies_imdb()
-
-    if args.action == "loadrating":
-        loadrating_imdb()
-
-    if args.action == "loaddbtranslated":
-        loadtranslatedtitles_imdb()
