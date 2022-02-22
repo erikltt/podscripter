@@ -12,6 +12,4 @@ Install VOSK and copy french model to your local disk inside "model" folder
 ### Name-dataset installation
 Name-dataset is a python library containing list of common names used in this project  
 `pip install names-dataset`
-### PL/SQL DB installation
-Install psycopg2 to use PL/SQL DB
-`pip install psycopg2`
+### TO BE CONTINUED
