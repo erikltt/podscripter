@@ -18,7 +18,7 @@ Name-dataset is a python library containing list of common names used in this pr
 ## Initialisation
 The following actions are not mandatory as the script comes with a preloaded DB containing IMDB datasets updated the 22nd of Februar 2022.  
 These actions are long as the dataset from IMDB is rather big (~9M lines)
-### Init refresh of movie DB from IMDB datasets
+### Init/refresh of movie DB from IMDB datasets
 `python init.py --action initdb
 ### Load IMDB movie dataset
 `python init.py --action imdbmovie
