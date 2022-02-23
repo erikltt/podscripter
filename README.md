@@ -36,5 +36,15 @@ The process is subdivided into several steps
 `python podscripter.py --action transcribe --chunkfolder audio-chunk`  
 `python podscripter.py --action preparse --transcribedfile 14007-02.01.2022-ITEMA_22886172-2022F4007S0002-22.txt`  
 `python podscripter.py --action parse --transcribedfile 14007-02.01.2022-ITEMA_22886172-2022F4007S0002-22.txt`  
-Result  
-
+### Result  
+`Pattern selected:  ['vous ne désirez que moi']`
+`Matched text    :  ['film vous ne désirez que moi Claire']`
+`Pattern selected:  ['les jeunes amants']`
+`Matched text    :  ['le film les jeunes amants de']`
+`Pattern selected:  ['les voisins de mes voisins sont mes voisins']`
+`Matched text    :  ['réjouissant les voisins de mes voisins sont mes voisins un drôle de film']`
+`Pattern selected:  ['petite solange']`
+`Matched text    :  ["voir ce petite solange d'"]`
+`Pattern selected:  ['teresa la voleuse']`
+`Matched text    :  ['voir teresa la voleuse moi']`
+`['vous ne désirez que moi', 'les jeunes amants', 'les voisins de mes voisins sont mes voisins', 'petite solange', 'teresa la voleuse']`
