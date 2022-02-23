@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+import argparse
 import csv
 import gzip
 import os
@@ -152,6 +153,13 @@ def update_translation(conn, movie):
 
 
 if __name__ == '__main__':
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--action", help="initdb : initialize SQLITE DB"
+                                         "imdbmovie : load IMDB movie dataset, "
+                                         "imdbtranslate : load IMDB translated titles "
+                                         "imdbratings : loads IMDB rating", required=True)
+    args = parser.parse_args()
+
     sql_movie_table = """
     CREATE TABLE movie (
     id integer PRIMARY KEY AUTOINCREMENT,
@@ -171,9 +179,15 @@ if __name__ == '__main__':
         ON movie(title);
         """
 
-    db_connection = create_connection(DB_FILE)
-    create_table(db_connection, sql_movie_table)
-    create_index(db_connection, sql_movie_index_imdb)
-    create_index(db_connection, sql_movie_index_title)
+    if args.action == "initdb":
+        db_connection = create_connection(DB_FILE)
+        create_table(db_connection, sql_movie_table)
+        create_index(db_connection, sql_movie_index_imdb)
+        create_index(db_connection, sql_movie_index_title)
 
-    loadrating_imdb()
+    if args.action == "imdbmovie":
+        loadmovies_imdb()
+    if args.action == "imdbtranslate":
+        loadtranslatedtitles_imdb()
+    if args.action == "imdbratings":
+        loadrating_imdb()

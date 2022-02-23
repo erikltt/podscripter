@@ -13,7 +13,6 @@ from os.path import isfile, join
 from urllib.parse import urlparse
 
 import feedparser
-import psycopg2 as psycopg2
 import requests
 import spacy as spacy
 from pydub import AudioSegment
@@ -405,7 +404,7 @@ def preparse():
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
 
-    parser.add_argument("--action", help="convert : chunk file, transcript : transcript into text the resul of "
+    parser.add_argument("--action", help="convert : chunk file, transcribe : transcribe into text the resul of "
                                          "conversion", required=True)
     parser.add_argument("--file", help="MP3 to transcript", required="--convert" in sys.argv)
     parser.add_argument("--chunkfolder", help="folder containing chunks", required="--transcript" in sys.argv)
@@ -422,7 +421,7 @@ if __name__ == '__main__':
     if args.action == "convert":
         conversion()
 
-    if args.action == "transcript":
+    if args.action == "transcribe":
         transcription()
 
     if args.action == "preparse":
