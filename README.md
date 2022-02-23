@@ -1,5 +1,7 @@
 # podscripter
-Extract information from podcasts. When listening to podcasts, I often hear people talk about great movies they saw and they want to share. The idea is to get this information out of these audio files. It is not meant to be comprehensive. It is based on the use of Spacy NLP programming, VOSK speech recognition, with the help of IMDB datasets, and name-dataset from  https://github.com/philipperemy/name-dataset
+Extract information from podcasts. When listening to podcasts, I often hear people talk about great movies they saw and they want to share.  
+The idea is to get this information out of these audio files. It is not meant to be comprehensive.  
+It is based on the use of Spacy NLP programming, VOSK speech recognition, with the help of IMDB datasets, and name-dataset from  https://github.com/philipperemy/name-dataset  
 Currently only works for movies, and french podcasts.
 ## Installation
 ### git repository
