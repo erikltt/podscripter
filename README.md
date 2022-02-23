@@ -15,4 +15,12 @@ Install VOSK and copy french model to your local disk inside "model" folder
 ### Name-dataset installation
 Name-dataset is a python library containing list of common names used in this project  
 `pip install names-dataset`
-### TO BE CONTINUED
+## USAGE
+### Init refresh of movie DB from IMDB datasets
+`python init.py --action initdb
+### Load IMDB movie dataset
+`python init.py --action imdbmovie
+### Load IMDB translated titles
+`python init.py --action imdbtranslate
+### Load IMDB movie ratings
+`python init.py --action imdbratings
