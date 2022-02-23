@@ -31,7 +31,7 @@ The process is subdivided into several steps
 1. Convert the podcast into small audio chunks
 2. Transcribe the chunks into text
 3. Preparse the file
-4. Parse the file
+4. Parse the file  
 `python podscripter.py --action convert --file 14007-02.01.2022-ITEMA_22886172-2022F4007S0002-22.mp3  
 `python podscripter.py --action transcribe --chunkfolder audio-chunk  
 `python podscripter.py --action preparse --transcribedfile 14007-02.01.2022-ITEMA_22886172-2022F4007S0002-22.txt  
