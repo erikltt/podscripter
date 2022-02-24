@@ -227,8 +227,11 @@ def __match_film(doc, matcher, pattern, position):
         match_list.append(str.replace(doc[start + position].text, '_', ' '))
         match_text.append(str.replace(doc[start:end].text, '_', ' '))
 
-    print("Pattern selected: ", match_list)
-    print("Matched text    : ", match_text)
+    print("Pattern : ", pattern[:position] + ["<FILM>"] + pattern[position+1:])
+    if len(match_text) > 0:
+        print("Match   : ", match_text)
+    else:
+        print("No match")
 
     return match_list
 
@@ -325,6 +328,13 @@ def __fine_match(rs_string, transcribed_text):
                     {"LOWER": {"IN": rs_string}},
                     {"POS": "VERB", "OP": "!"}], 1))
 
+    # MR6 : ce film rien à foutre
+    match_list.extend(
+        __match_film(doc, matcher,
+                     [{"LOWER": "ce"},
+                      {"LOWER": "film"},
+                      {"LOWER": {"IN": rs_string}}], 2))
+
     return list(dict.fromkeys(match_list))
 
 
@@ -357,6 +367,7 @@ def preparse():
     mingled with adjectives.
     Uses the top 500 first-names in FR, GB and US. The other nationalities would not be correctly recognized
     and transcribed by VOSK anyway"""
+    print('Preparsing...')
     nd = NameDataset()
 
     with open(transcribed_file, "r") as f:
