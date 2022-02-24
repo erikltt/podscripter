@@ -15,7 +15,7 @@ Install VOSK and copy french model to your local disk inside "model" folder
 ### SPACY installation
 Install spacy and french model  
 `pip install -U spacy`  
-`python -m spacy download en_core_web_sm`
+`python -m spacy download fr_core_news_md`
 ### Name-dataset installation
 Name-dataset is a python library containing list of common names used in this project  
 `pip install names-dataset`
