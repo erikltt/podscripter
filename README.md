@@ -11,7 +11,11 @@ Install VOSK and copy french model to your local disk inside "model" folder
 `pip3 install vosk`  
 `wget https://alphacephei.com/vosk/models/vosk-model-fr-0.6-linto.zip`  
 `unzip vosk-model-small-en-us-0.15.zip`  
-`mv vosk-model-small-en-us-0.15 model`  
+`mv vosk-model-small-en-us-0.15 model` 
+### SPACY installation
+Install spacy and french model  
+`pip install -U spacy`  
+`python -m spacy download en_core_web_sm`
 ### Name-dataset installation
 Name-dataset is a python library containing list of common names used in this project  
 `pip install names-dataset`
