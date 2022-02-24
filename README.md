@@ -11,27 +11,32 @@ Install VOSK and copy french model to your local disk inside "model" folder
 `pip3 install vosk`  
 `wget https://alphacephei.com/vosk/models/vosk-model-fr-0.6-linto.zip`  
 `unzip vosk-model-small-en-us-0.15.zip`  
-`mv vosk-model-small-en-us-0.15 model`  
+`mv vosk-model-small-en-us-0.15 model` 
+### SPACY installation
+Install spacy and french model  
+`pip install -U spacy`  
+`python -m spacy download fr_core_news_md`
 ### Name-dataset installation
 Name-dataset is a python library containing list of common names used in this project  
 `pip install names-dataset`
 ## Initialisation
 The following actions are not mandatory as the script comes with a preloaded DB containing IMDB datasets updated the 22nd of Februar 2022.  
 These actions are long as the dataset from IMDB is rather big (~9M lines)
-### Init refresh of movie DB from IMDB datasets
-`python init.py --action initdb
+### Init/refresh of movie DB from IMDB datasets
+`python init.py --action initdb`
 ### Load IMDB movie dataset
-`python init.py --action imdbmovie
+`python init.py --action imdbmovie`
 ### Load IMDB translated titles
-`python init.py --action imdbtranslate
+`python init.py --action imdbtranslate`
 ### Load IMDB movie ratings
-`python init.py --action imdbratings
+`python init.py --action imdbratings`
 ## Usage
 The process is subdivided into several steps  
 1. Convert the podcast into small audio chunks
 2. Transcribe the chunks into text
 3. Preparse the file
 4. Parse the file  
+### Commands
 `python podscripter.py --action convert --file 14007-02.01.2022-ITEMA_22886172-2022F4007S0002-22.mp3`  
 `python podscripter.py --action transcribe --chunkfolder audio-chunk`  
 `python podscripter.py --action preparse --transcribedfile 14007-02.01.2022-ITEMA_22886172-2022F4007S0002-22.txt`  
