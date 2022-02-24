@@ -19,13 +19,13 @@ Name-dataset is a python library containing list of common names used in this pr
 The following actions are not mandatory as the script comes with a preloaded DB containing IMDB datasets updated the 22nd of Februar 2022.  
 These actions are long as the dataset from IMDB is rather big (~9M lines)
 ### Init/refresh of movie DB from IMDB datasets
-`python init.py --action initdb
+`python init.py --action initdb`
 ### Load IMDB movie dataset
-`python init.py --action imdbmovie
+`python init.py --action imdbmovie`
 ### Load IMDB translated titles
-`python init.py --action imdbtranslate
+`python init.py --action imdbtranslate`
 ### Load IMDB movie ratings
-`python init.py --action imdbratings
+`python init.py --action imdbratings`
 ## Usage
 The process is subdivided into several steps  
 1. Convert the podcast into small audio chunks
