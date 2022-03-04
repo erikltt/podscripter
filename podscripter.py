@@ -244,7 +244,7 @@ def __brute_match(rs, transcribed_text):
 
     # setting up exception list, we have the word "film" to avoid the matcher to consider it as a film title since it
     # would make it miss matching rule MR1/2/3 (MR containg the word film)
-    exception_list = ["film"]
+    exception_list = ["film", "qui"]
 
     # using case folded transcribed text to match without case consideration
     transcribed_text_casefolded = transcribed_text.casefold()
@@ -335,6 +335,29 @@ def __fine_match(rs_string, transcribed_text):
                       {"LOWER": "film"},
                       {"LOWER": {"IN": rs_string}}], 2))
 
+    # MR7 : film la vraie famille de Fabien
+    match_list.extend(
+        __match_film(doc, matcher,
+                     [{"LOWER": "film"},
+                      {"LOWER": {"IN": rs_string}},
+                      {"LOWER": "de"},
+                      {"POS": "PROPN"}], 1))
+
+    # MR8 : un autre monde de Stéphane
+    #match_list.extend(
+    #    __match_film(doc, matcher,
+    #                 [{"LOWER": {"IN": rs_string}},
+    #                  {"LOWER": "de"},
+    #                  {"POS": "PROPN"}], 0))
+
+    # MR8 : Alain Cavalier dans pater
+    match_list.extend(
+        __match_film(doc, matcher,
+                     [{"POS": "PROPN"},
+                      {"POS": "PROPN"},
+                      {"LOWER": "dans"},
+                      {"TEXT": {"IN": rs_string}}], 3))
+
     return list(dict.fromkeys(match_list))
 
 
@@ -382,15 +405,21 @@ def preparse():
 
     token_list = []
     common_names = []
-    common_names_dict = nd.get_top_names(n=500, use_first_names=True, country_alpha2='FR')
+    common_names_dict = nd.get_top_names(n=250, use_first_names=True, country_alpha2='FR')
     common_names.extend(common_names_dict["FR"]["M"])
     common_names.extend(common_names_dict["FR"]["F"])
-    common_names_dict = nd.get_top_names(n=500, use_first_names=True, country_alpha2='US')
+    common_names_dict = nd.get_top_names(n=250, use_first_names=True, country_alpha2='US')
     common_names.extend(common_names_dict["US"]["M"])
     common_names.extend(common_names_dict["US"]["F"])
-    common_names_dict = nd.get_top_names(n=500, use_first_names=True, country_alpha2='GB')
+    common_names_dict = nd.get_top_names(n=250, use_first_names=True, country_alpha2='GB')
     common_names.extend(common_names_dict["GB"]["M"])
     common_names.extend(common_names_dict["GB"]["F"])
+    common_names_dict = nd.get_top_names(n=5000, use_first_names=False, country_alpha2='FR')
+    common_names.extend(common_names_dict["FR"])
+    common_names_dict = nd.get_top_names(n=5000, use_first_names=False, country_alpha2='US')
+    common_names.extend(common_names_dict["US"])
+    common_names_dict = nd.get_top_names(n=5000, use_first_names=False, country_alpha2='GB')
+    common_names.extend(common_names_dict["GB"])
 
     # common_names = [name.lower() for name in common_names]
 
@@ -439,7 +468,6 @@ if __name__ == '__main__':
         print(preparse())
 
     if args.action == "parse":
-        print(preparse())
         print(parse())
 
     if args.action == "download":
