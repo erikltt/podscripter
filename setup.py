@@ -9,6 +9,6 @@ setup(
     author_email='erikltt@hotmail.com',
     license='None',
     packages=['podscripter'],
-    install_requires=['spacy', 'requests', 'feedparser', 'pydub', 'vosk'],
+    install_requires=['spacy', 'requests', 'feedparser', 'pydub', 'vosk', 'names_dataset'],
     classifiers=[]
 )
