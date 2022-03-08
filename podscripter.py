@@ -358,6 +358,16 @@ def __fine_match(rs_string, transcribed_text):
                       {"LOWER": "dans"},
                       {"TEXT": {"IN": rs_string}}], 3))
 
+    # MR9 : maigret le film de Patrice Leconte
+    match_list.extend(
+        __match_film(doc, matcher,
+                     [{"TEXT": {"IN": rs_string}},
+                      {"POS": "DET"},
+                      {"ORTH": "film"},
+                      {"ORTH": "de"},
+                      {"POS": "PROPN"},
+                      {"POS": "PROPN", "OP": "?"}], 0))
+
     return list(dict.fromkeys(match_list))
 
 
@@ -446,7 +456,7 @@ if __name__ == '__main__':
 
     parser.add_argument("--action", help="convert : chunk file, transcribe : transcribe into text the resul of "
                                          "conversion", required=True)
-    parser.add_argument("--file", help="MP3 to transcript", required="--convert" in sys.argv)
+    parser.add_argument("--file", help="MP3 to transcript", required="--convert" in sys.argv or "--all" in sys.argv)
     parser.add_argument("--chunkfolder", help="folder containing chunks", required="--transcript" in sys.argv)
     parser.add_argument("--transcribedfile", help="file to pre-parse",
                         required="--preparse" in sys.argv or "--parse" in sys.argv)
@@ -472,4 +482,12 @@ if __name__ == '__main__':
 
     if args.action == "download":
         download_rss_feed()
+
+    if args.action == "all":
+        conversion()
+        chunk_folder = os.path.splitext(sound_file_path)[0]
+        transcription()
+        transcribed_file = chunk_folder.split('/')[-1] + '.txt'
+        print(preparse())
+        print(parse())
 
