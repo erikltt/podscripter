@@ -244,7 +244,7 @@ def __brute_match(rs, transcribed_text):
 
     # setting up exception list, we have the word "film" to avoid the matcher to consider it as a film title since it
     # would make it miss matching rule MR1/2/3 (MR containg the word film)
-    exception_list = ["film", "qui"]
+    exception_list = ["film", "qui", "le nouveau", "a un"]
 
     # using case folded transcribed text to match without case consideration
     transcribed_text_casefolded = transcribed_text.casefold()
@@ -261,7 +261,7 @@ def __brute_match(rs, transcribed_text):
             # we avoid modifying film title containing only one word, it could be a name or surname, and that would
             # interfere with the preparse process that uppercase such words to make spacy recognize them as "PROPN"
             if len(text_title.split()) > 1:
-                replaced_title = str.replace(text_title, ' ', '_').lower()
+                replaced_title = str.replace(str.replace(text_title, ' ', '_'), '\'', '_').lower().capitalize()
             else:
                 replaced_title = text_title
             # we add the brute-matched title to the list of possible real match
@@ -292,24 +292,29 @@ def __fine_match(rs_string, transcribed_text):
     doc = nlp(transcribed_text)
     match_list = []
 
+    if args.tagging:
+        for token in doc:
+            print(token.text, token.lemma_, token.pos_, token.tag_, token.dep_,
+                  token.shape_, token.is_alpha, token.is_stop)
+
     # MR1 : film vous ne désirez que moi claire simon
     match_list.extend(
         __match_film(doc, matcher,
                    [{"LOWER": "film"},
-                    {"LOWER": {"IN": rs_string}},
+                    {"ORTH": {"IN": rs_string}},
                     {"POS": "PROPN"}], 1))
     # MR2 : Le film les jeunes amants de carine tardieu
     match_list.extend(
         __match_film(doc, matcher,
                    [{"POS": "DET"},
                     {"LOWER": "film"},
-                    {"LOWER": {"IN": rs_string}},
+                    {"ORTH": {"IN": rs_string}},
                     {"TEXT": "de"}], 2))
     # MR3 : réjouissant les voisins de mes voisins sont mes voisins (un) drôle (de) film
     match_list.extend(
         __match_film(doc, matcher,
                    [{"POS": "ADJ"},
-                    {"LOWER": {"IN": rs_string}},
+                    {"ORTH": {"IN": rs_string}},
                     {"POS": "DET", "OP": "?"},
                     {"POS": "NOUN"},
                     {"POS": "ADP", "OP": "?"},
@@ -319,36 +324,29 @@ def __fine_match(rs_string, transcribed_text):
         __match_film(doc, matcher,
                    [{"LEMMA": "voir"},
                     {"POS": "DET"},
-                    {"LOWER": {"IN": rs_string}},
+                    {"ORTH": {"IN": rs_string}},
                     {"POS": "VERB", "OP": "!"}], 2))
     # MR5 : voir teresa la voleuse
     match_list.extend(
         __match_film(doc, matcher,
                    [{"LEMMA": "voir"},
-                    {"LOWER": {"IN": rs_string}},
+                    {"ORTH": {"IN": rs_string}},
                     {"POS": "VERB", "OP": "!"}], 1))
 
-    # MR6 : ce film rien à foutre
+    # MR6 : ce film rien à foutre, son film mademoiselle chambon
     match_list.extend(
         __match_film(doc, matcher,
-                     [{"LOWER": "ce"},
-                      {"LOWER": "film"},
-                      {"LOWER": {"IN": rs_string}}], 2))
+                     [{"POS": "DET"},
+                      {"ORTH": "film"},
+                      {"ORTH": {"IN": rs_string}}], 2))
 
     # MR7 : film la vraie famille de Fabien
     match_list.extend(
         __match_film(doc, matcher,
                      [{"LOWER": "film"},
-                      {"LOWER": {"IN": rs_string}},
+                      {"ORTH": {"IN": rs_string}},
                       {"LOWER": "de"},
                       {"POS": "PROPN"}], 1))
-
-    # MR8 : un autre monde de Stéphane
-    #match_list.extend(
-    #    __match_film(doc, matcher,
-    #                 [{"LOWER": {"IN": rs_string}},
-    #                  {"LOWER": "de"},
-    #                  {"POS": "PROPN"}], 0))
 
     # MR8 : Alain Cavalier dans pater
     match_list.extend(
@@ -356,17 +354,37 @@ def __fine_match(rs_string, transcribed_text):
                      [{"POS": "PROPN"},
                       {"POS": "PROPN"},
                       {"LOWER": "dans"},
-                      {"TEXT": {"IN": rs_string}}], 3))
+                      {"ORTH": {"IN": rs_string}}], 3))
 
     # MR9 : maigret le film de Patrice Leconte
     match_list.extend(
         __match_film(doc, matcher,
-                     [{"TEXT": {"IN": rs_string}},
+                     [{"ORTH": {"IN": rs_string}},
                       {"POS": "DET"},
                       {"ORTH": "film"},
                       {"ORTH": "de"},
                       {"POS": "PROPN"},
                       {"POS": "PROPN", "OP": "?"}], 0))
+
+    # MR10 : viens je t'emmène le nouveau film d'alain giraud
+    match_list.extend(
+        __match_film(doc, matcher,
+                     [{"ORTH": {"IN": rs_string}},
+                      {"POS": "DET"},
+                      {"POS": "ADJ", "OP": "?"},
+                      {"ORTH": "film"},
+                      {"POS": "ADP"},
+                      {"POS": "PROPN"},
+                      {"POS": "PROPN", "OP": "?"}], 0))
+
+    # MR11 : le film s'appelle les poings desserrés
+    match_list.extend(
+        __match_film(doc, matcher,
+                     [{"POS": "DET"},
+                      {"ORTH": "film"},
+                      {"POS": "PRON"},
+                      {"POS": "VERB"},
+                      {"ORTH": {"IN": rs_string}}], 4))
 
     return list(dict.fromkeys(match_list))
 
@@ -461,6 +479,8 @@ if __name__ == '__main__':
     parser.add_argument("--transcribedfile", help="file to pre-parse",
                         required="--preparse" in sys.argv or "--parse" in sys.argv)
     parser.add_argument("--xmlfeedurl", help="Feed URL XML format", required="--download" in sys.argv)
+    parser.add_argument("--tagging", action="store_true", help="Spacy tagging in output")
+
     args = parser.parse_args()
     action = args.action
     sound_file_path = args.file
